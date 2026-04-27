@@ -1,0 +1,165 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for structured data storage
+  postgres:
+    image: postgres:15-alpine
+    container_name: paksential_db
+    environment:
+      POSTGRES_USER: paksential
+      POSTGRES_PASSWORD: paksential_secure_pwd
+      POSTGRES_DB: paksential_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - paksential_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paksential"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MongoDB for document storage (alternative to PostgreSQL)
+  mongodb:
+    image: mongo:7.0
+    container_name: paksential_mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: paksential
+      MONGO_INITDB_ROOT_PASSWORD: paksential_secure_pwd
+      MONGO_INITDB_DATABASE: paksential_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - paksential_network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO for S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: paksential_minio
+    environment:
+      MINIO_ROOT_USER: paksential
+      MINIO_ROOT_PASSWORD: paksential_secure_pwd
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - paksential_network
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MLFlow Tracking Server (using SQLite for simplicity)
+  mlflow:
+    image: python:3.10-slim
+    container_name: paksential_mlflow
+    working_dir: /app
+    command: >
+      bash -c "pip install mlflow==2.9.1 &&
+      mlflow server --backend-store-uri sqlite:////app/mlflow_data/mlflow.db 
+      --default-artifact-root /app/mlflow_artifacts 
+      --host 0.0.0.0 --port 5000"
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_BACKEND_STORE_URI: sqlite:////app/mlflow_data/mlflow.db
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: /app/mlflow_artifacts
+    volumes:
+      - ./mlflow_data:/app/mlflow_data
+      - ./mlflow_artifacts:/app/mlflow_artifacts
+    networks:
+      - paksential_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # FastAPI Application Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: paksential_api
+    working_dir: /app
+    command: >
+      bash -c "pip install -r requirements.txt &&
+      python -m uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      DATABASE_URL: postgresql://paksential:paksential_secure_pwd@postgres:5432/paksential_db
+      MONGO_URI: mongodb://paksential:paksential_secure_pwd@mongodb:27017/paksential_db
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: paksential
+      MINIO_SECRET_KEY: paksential_secure_pwd
+    volumes:
+      - ./src:/app/src
+      - ./api:/app/api
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./mlflow_tracking:/app/mlflow_tracking
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    networks:
+      - paksential_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Jupyter Notebook for analysis and experimentation
+  jupyter:
+    image: python:3.10-slim
+    container_name: paksential_jupyter
+    working_dir: /app
+    command: >
+      bash -c "pip install -r requirements.txt &&
+      jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root 
+      --NotebookApp.token='' --NotebookApp.password=''"
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/app/notebooks
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./models:/app/models
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    depends_on:
+      - mlflow
+    networks:
+      - paksential_network
+
+networks:
+  paksential_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mongodb_data:
+  minio_data:
+  mlflow_data:
+  mlflow_artifacts:
