@@ -2,8 +2,6 @@
 Task 7: FastAPI inference system backed by saved training artifacts.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import os

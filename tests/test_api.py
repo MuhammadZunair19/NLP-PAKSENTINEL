@@ -158,14 +158,13 @@ class TestPerformanceEndpoint:
 class TestConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_requests(self, build_test_bundle):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            tasks = [
-                client.post(
-                    "/classify",
-                    json={"text": f"official statement number {idx} about verified policy update", "model_type": "production"},
-                )
-                for idx in range(5)
-            ]
+        def make_request(client: TestClient, idx: int):
+            return client.post(
+                "/classify",
+                json={"text": f"official statement number {idx} about verified policy update", "model_type": "production"},
+            )
+
+        with TestClient(app) as client:
+            tasks = [asyncio.to_thread(make_request, client, idx) for idx in range(5)]
             responses = await asyncio.gather(*tasks)
             assert all(response.status_code == 200 for response in responses)
