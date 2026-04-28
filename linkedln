@@ -1,0 +1,19 @@
+I recently completed PakSentinel, an end-to-end NLP project focused on misinformation detection, semantic retrieval, experiment tracking, and production deployment.
+
+What made this project meaningful to me was that it was not just about training a classifier and reporting an accuracy score. The goal was to think through the full lifecycle of an NLP system: how data is sourced, how its reliability is evaluated, how preprocessing choices affect outcomes, how experiments are tracked, and how a model is eventually exposed through an API in a reproducible way.
+
+The pipeline was designed around a three-class misinformation setting: Real, Fake, and Satire. I worked on dataset consolidation from multiple sources, reliability scoring, text cleaning, tokenizer comparison, stopword analysis, feature engineering with BoW, TF-IDF, and Word2Vec, classical language modeling, and machine learning baselines including Naive Bayes and Logistic Regression. I also integrated MLflow for experiment tracking and built a FastAPI inference layer for serving predictions and similar-claim retrieval.
+
+One of the biggest takeaways from this project was how much the “small” engineering decisions matter in NLP. Tokenization, label mapping, stopword design, class balance, and artifact management all shape the quality and credibility of the final system. It reinforced the idea that building trustworthy ML systems is not only about model choice, but also about disciplined experimentation and reproducibility.
+
+I also appreciated how relevant this problem is in the Pakistani context. During elections, disasters, and public health events, misinformation can spread faster than verified reporting. Working on a system like this helped me connect technical NLP methods with a problem that has real social impact.
+
+This project strengthened my skills across:
+
+- NLP preprocessing and representation learning
+- classical and discriminative text classification
+- experiment tracking with MLflow
+- API design with FastAPI
+- reproducible project setup with Docker and virtual environments
+
+More than anything, it reminded me that good ML work is not just about making something run. It is about making it explainable, reproducible, and useful in the real world.

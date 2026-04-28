@@ -26,6 +26,34 @@ data/
       # or pakistan_dataset.parquet / pakistan_dataset.jsonl
 ```
 
+## Build the Pakistan scraped dataset
+
+The assignment asks for a self-constructed scrape using Pakistani news sources and X/Twitter. This repo now includes a scraper at [src/pakistan_scraper.py](D:/University%20Work/SEMESTER%208/NLP/Assignment%202/src/pakistan_scraper.py).
+
+It collects:
+
+- `Real` from Dawn / Geo / ARY RSS feeds using `BeautifulSoup`
+- `Fake` from X/Twitter search queries using `Tweepy`
+- `Satire` from X/Twitter satire/parody handles or satire search queries
+
+Set the feed URLs and Twitter bearer token in `.env` or environment variables, then run:
+
+```powershell
+.\.venv\Scripts\python.exe .\src\pakistan_scraper.py --overwrite
+```
+
+This writes:
+
+```text
+data/raw/pakistan/pakistan_dataset.csv
+```
+
+You can tune the collection sizes:
+
+```powershell
+.\.venv\Scripts\python.exe .\src\pakistan_scraper.py --real-per-source 700 --fake-limit 1200 --satire-limit 1200 --overwrite
+```
+
 ## Fresh setup
 
 From the repository root:
