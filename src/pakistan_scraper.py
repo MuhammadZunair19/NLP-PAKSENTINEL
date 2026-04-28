@@ -119,10 +119,22 @@ def _request(url: str, timeout: int) -> requests.Response:
     return response
 
 
+def _parse_feed(content: bytes, source_name: str) -> BeautifulSoup:
+    try:
+        return BeautifulSoup(content, "xml")
+    except Exception as exc:
+        logger.warning(
+            "XML parser unavailable or failed for %s feed (%s). Falling back to html.parser.",
+            source_name,
+            exc,
+        )
+        return BeautifulSoup(content, "html.parser")
+
+
 def scrape_rss_feed(feed: FeedSource, limit: int, timeout: int) -> List[Dict[str, str]]:
     logger.info("Scraping %s feed from %s", feed.source, feed.feed_url)
     response = _request(feed.feed_url, timeout=timeout)
-    soup = BeautifulSoup(response.content, "xml")
+    soup = _parse_feed(response.content, feed.source)
     items = soup.find_all(["item", "entry"])
 
     records: List[Dict[str, str]] = []
