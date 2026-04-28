@@ -30,11 +30,13 @@ data/
 
 The assignment asks for a self-constructed scrape using Pakistani news sources and X/Twitter. This repo now includes a scraper at [src/pakistan_scraper.py](D:/University%20Work/SEMESTER%208/NLP/Assignment%202/src/pakistan_scraper.py).
 
+It now defaults to a COVID-focused Pakistan scrape so the collected samples line up better with the assignment's misinformation setting.
+
 It collects:
 
-- `Real` from Dawn / Geo / ARY RSS feeds using `BeautifulSoup`
-- `Fake` from X/Twitter search queries using `Tweepy`
-- `Satire` from X/Twitter satire/parody handles or satire search queries
+- `Real` from Dawn / Geo / ARY RSS feeds using `BeautifulSoup`, filtered to COVID-related keywords
+- `Fake` from X/Twitter COVID misinformation search queries using `Tweepy`
+- `Satire` from X/Twitter COVID satire/parody handles or satire search queries
 
 Set the feed URLs and Twitter bearer token in `.env` or environment variables, then run:
 
@@ -46,6 +48,12 @@ This writes:
 
 ```text
 data/raw/pakistan/pakistan_dataset.csv
+```
+
+The topic filter is controlled by `PAKISTAN_SCRAPER_KEYWORDS` in `.env`. The default keywords are:
+
+```text
+covid,covid-19,coronavirus,vaccine,vaccination,booster,pandemic,omicron,lockdown,mask
 ```
 
 You can tune the collection sizes:
