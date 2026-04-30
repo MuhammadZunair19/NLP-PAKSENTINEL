@@ -71,7 +71,7 @@ class LocalStorageBackend(StorageBackend):
         metadata = metadata or {}
         
         # Create versioned key
-        version = datetime.now().isoformat()
+        version = datetime.now().isoformat().replace(':', '-')
         versioned_key = f"{key}_{version}"
         
         file_path = self.base_path / versioned_key
@@ -195,7 +195,7 @@ class MinIOStorageBackend(StorageBackend):
             return {"error": "MinIO not available"}
         
         metadata = metadata or {}
-        version = datetime.now().isoformat()
+        version = datetime.now().isoformat().replace(':', '-')
         versioned_key = f"{key}_{version}"
         
         try:

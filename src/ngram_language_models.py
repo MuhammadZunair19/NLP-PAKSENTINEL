@@ -43,6 +43,10 @@ class NGramModel:
         
         self.vocab_size = 0
         self.total_ngrams = 0
+        
+        # Kneser-Ney smoothing caches (computed during training)
+        self.total_unique_tokens = 0  # Total unique final tokens in corpus
+        self.token_context_count = defaultdict(int)  # Count contexts ending with each token
     
     def train(self, texts: List[str], tokenized: bool = False) -> None:
         """
@@ -53,9 +57,12 @@ class NGramModel:
             tokenized: Whether texts are already tokenized
         """
         
-        logger.info(f"Training {self.n}-gram model with {self.smoothing} smoothing...")
+        logger.info(f"Training {self.n}-gram model with {self.smoothing} smoothing on {len(texts)} documents...")
         
-        for text in texts:
+        for text_idx, text in enumerate(texts, 1):
+            if text_idx % max(1, len(texts) // 10) == 0:
+                logger.info(f"  Processing document {text_idx}/{len(texts)}")
+            
             if not tokenized:
                 tokens = text.lower().split()
             else:
@@ -74,10 +81,31 @@ class NGramModel:
                 self.context_count[context] += 1
                 self.unigrams[token] += 1
                 self.total_ngrams += 1
+                
+                # Track for Kneser-Ney smoothing
+                if token not in {tc for tc in self.token_context_count}:
+                    self.token_context_count[token] = 0
         
         self.vocab_size = len(self.unigrams)
         
-        logger.info(f"Trained {self.n}-gram model: vocab_size={self.vocab_size}, "
+        # Pre-compute Kneser-Ney caches
+        if self.smoothing == 'kneser-ney':
+            logger.info(f"  Computing Kneser-Ney smoothing caches...")
+            # Count unique tokens that appear as final tokens
+            self.total_unique_tokens = len(set(ngram[-1] for ngram in self.ngrams))
+            
+            # For each token, count how many different contexts it appears after
+            token_contexts = defaultdict(set)
+            for ngram in self.ngrams:
+                token = ngram[-1]
+                context = ngram[:-1]
+                token_contexts[token].add(context)
+            
+            # Store counts of unique contexts per token
+            self.token_context_count = {token: len(contexts) for token, contexts in token_contexts.items()}
+            logger.info(f"  ✓ Kneser-Ney caches computed: {self.total_unique_tokens} unique tokens")
+        
+        logger.info(f"✓ Trained {self.n}-gram model: vocab_size={self.vocab_size}, "
                    f"unique_ngrams={len(self.ngrams)}, total_ngrams={self.total_ngrams}")
     
     def get_probability(self, ngram: Tuple[str, ...]) -> float:
@@ -146,11 +174,11 @@ class NGramModel:
         
         # Second term: backoff probability
         if len(context) > 0:
-            # Count unique contexts that end with this token
-            unique_contexts = len([ng for ng in self.ngrams if ng[-1] == token])
+            # Use cached value: count unique contexts that end with this token
+            unique_contexts = self.token_context_count.get(token, 0)
             
-            # Normalize by total unique (w) in the corpus
-            total_unique = len(set(ngram[-1] for ngram in self.ngrams))
+            # Use cached value: total unique tokens in the corpus
+            total_unique = self.total_unique_tokens
             
             backoff_weight = (d / context_total) * unique_contexts if context_total > 0 else 0
             backoff_prob = self._kneser_ney_probability(context + (token,)) if len(context) < self.n - 1 else self.unigrams[token] / self.total_ngrams
@@ -176,8 +204,13 @@ class NGramModel:
         
         total_log_prob = 0
         total_tokens = 0
+        texts_processed = 0
+        log_interval = max(1, len(texts) // 5)  # Log every 20% of texts
         
-        for text in texts:
+        for text_idx, text in enumerate(texts, 1):
+            if text_idx % log_interval == 0:
+                logger.info(f"  Perplexity calculation: {text_idx}/{len(texts)} texts processed")
+            
             if not tokenized:
                 tokens = text.lower().split()
             else:
@@ -233,9 +266,11 @@ class LanguageModelClassifier:
         
         self.classes = list(set(labels))
         stats = {}
+        total_classes = len(self.classes)
         
-        for label in self.classes:
+        for idx, label in enumerate(self.classes, 1):
             class_texts = [texts[i] for i, l in enumerate(labels) if l == label]
+            logger.info(f"  [{idx}/{total_classes}] Training language model for class '{label}' with {len(class_texts)} documents...")
             
             model = NGramModel(n=self.n, smoothing=self.smoothing)
             model.train(class_texts)
@@ -247,8 +282,9 @@ class LanguageModelClassifier:
                 "training_documents": len(class_texts),
                 "top_ngrams": model.get_top_ngrams(5)
             }
+            logger.info(f"  [{idx}/{total_classes}] ✓ Completed - Vocab: {model.vocab_size}, N-grams: {len(model.ngrams)}")
         
-        logger.info(f"Trained {len(self.classes)} language models")
+        logger.info(f"✓ Training complete: {len(self.classes)} language models trained")
         
         return stats
     
@@ -278,15 +314,26 @@ class LanguageModelClassifier:
     def evaluate(self, texts: List[str], labels: List[str]) -> Dict:
         """Evaluate classifier on test set"""
         
-        logger.info("Evaluating language model classifier...")
+        total_samples = len(texts)
+        logger.info(f"Evaluating language model classifier on {total_samples} samples...")
         
         predictions = []
         perplexities_list = []
         
-        for text, true_label in zip(texts, labels):
+        # Log progress every 10% or every 10 samples, whichever is larger
+        log_interval = max(10, total_samples // 10)
+        
+        for idx, (text, true_label) in enumerate(zip(texts, labels), 1):
             pred_label, perps = self.predict(text)
             predictions.append(pred_label)
             perplexities_list.append(perps)
+            
+            # Log progress
+            if idx % log_interval == 0 or idx == total_samples:
+                progress_pct = (idx / total_samples) * 100
+                logger.info(f"  Progress: {idx}/{total_samples} samples ({progress_pct:.1f}%) - Current pred: {pred_label} vs true: {true_label}")
+        
+        logger.info(f"✓ Prediction complete. Computing metrics...")
         
         # Compute metrics
         from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -306,7 +353,7 @@ class LanguageModelClassifier:
             "classification_report": classification_report(labels, predictions, output_dict=True)
         }
         
-        logger.info(f"Results: Accuracy={accuracy:.4f}, F1={f1:.4f}")
+        logger.info(f"✓ Evaluation complete - Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
         
         return results
 

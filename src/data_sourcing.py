@@ -478,27 +478,44 @@ class DataSourceManager:
         self,
         min_samples: int = 5000,
         source_names: Optional[List[str]] = None,
+        target_samples: Optional[int] = None,
     ) -> Tuple[pd.DataFrame, Dict]:
+        """
+        Combine and intelligently sample datasets to reach target_samples (default: min_samples).
+        Balances class distribution and removes duplicates.
+        """
         logger.info("Combining datasets from local source files...")
         datasets = self.load_sources(source_names=source_names)
         if len(datasets) < 3:
             raise ValueError(
                 f"Only {len(datasets)} valid sources were loadable. At least 3 are required."
             )
+        
+        # Concatenate all datasets
         combined_df = pd.concat(datasets.values(), ignore_index=True)
         combined_df["text"] = combined_df["text"].fillna("").astype(str).str.strip()
         combined_df = combined_df[combined_df["label"].isin(CANONICAL_CLASSES)]
         combined_df = combined_df[combined_df["text"].str.len() > 0]
 
         initial_size = len(combined_df)
+        logger.info("Total samples before deduplication: %d", initial_size)
+        
+        # Remove duplicates
         combined_df = combined_df.drop_duplicates(subset=["text"], keep="first").reset_index(drop=True)
         duplicate_rate = ((initial_size - len(combined_df)) / initial_size * 100) if initial_size else 0.0
+        logger.info("Duplicates removed: %.1f%%", duplicate_rate)
 
         if len(combined_df) < min_samples:
             raise ValueError(
                 f"Combined dataset has {len(combined_df)} samples after deduplication; "
                 f"minimum required is {min_samples}. Add more source-backed samples."
             )
+
+        # Intelligent sampling to target_samples (defaults to min_samples)
+        target = target_samples or min_samples
+        if len(combined_df) > target:
+            combined_df = self._intelligent_sample(combined_df, target)
+            logger.info("Dataset sampled down to %d samples", len(combined_df))
 
         stats = {
             "total_samples": int(len(combined_df)),
@@ -508,6 +525,30 @@ class DataSourceManager:
             "avg_text_length": float(combined_df["text"].str.len().mean()),
         }
         return combined_df, stats
+
+    def _intelligent_sample(self, df: pd.DataFrame, target_samples: int) -> pd.DataFrame:
+        """
+        Intelligently sample dataset to target_samples while maintaining class balance.
+        Prioritizes balanced class distribution.
+        """
+        class_dist = df["label"].value_counts()
+        num_classes = len(class_dist)
+        
+        # Target samples per class (balanced)
+        samples_per_class = target_samples // num_classes
+        remainder = target_samples % num_classes
+        
+        sampled_frames = []
+        for idx, (label, count) in enumerate(class_dist.items()):
+            label_df = df[df["label"] == label]
+            n_samples = samples_per_class + (1 if idx < remainder else 0)
+            n_samples = min(n_samples, len(label_df))  # Can't sample more than available
+            
+            sampled = label_df.sample(n=n_samples, random_state=42, replace=False)
+            sampled_frames.append(sampled)
+            logger.info("  %s: sampled %d/%d samples", label, n_samples, count)
+        
+        return pd.concat(sampled_frames, ignore_index=True).sample(frac=1, random_state=42).reset_index(drop=True)
 
     def handle_class_imbalance(
         self,

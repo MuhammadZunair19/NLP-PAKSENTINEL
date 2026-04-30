@@ -277,6 +277,12 @@ class LogisticRegressionClassifier:
         for cls in self.classes:
             y_binary = (y == cls).astype(int)
             
+            # Convert class_weight to binary format if it's a dict
+            binary_class_weight = self.class_weight
+            if isinstance(self.class_weight, dict):
+                # If class_weight is a dict with original class names, use 'balanced' for binary classifiers
+                binary_class_weight = 'balanced'
+            
             model = SklearnLR(
                 C=self.C,
                 penalty=penalty,
@@ -284,7 +290,7 @@ class LogisticRegressionClassifier:
                 max_iter=1000,
                 random_state=42,
                 l1_ratio=0.5 if self.regularization == 'elasticnet' else None,
-                class_weight=self.class_weight,
+                class_weight=binary_class_weight,
             )
             model.fit(X_scaled, y_binary)
             
@@ -499,7 +505,10 @@ class PolynomialLRClassifier:
         mesh_points = np.c_[xx.ravel(), yy.ravel()]
         X_mesh_poly = model_info["poly"].transform(mesh_points)
         X_mesh_scaled = model_info["scaler"].transform(X_mesh_poly)
-        Z = model_info["model"].predict(X_mesh_scaled)
+        
+        # Get probabilities for decision boundary (use probability of second class)
+        Z_proba = model_info["model"].predict_proba(X_mesh_scaled)
+        Z = Z_proba[:, 1] if Z_proba.shape[1] > 1 else Z_proba[:, 0]
         Z = Z.reshape(xx.shape)
         
         # Plot
@@ -507,7 +516,13 @@ class PolynomialLRClassifier:
         plt.contourf(xx, yy, Z, alpha=0.4, cmap='RdYlBu')
         
         if y is not None:
-            scatter = plt.scatter(X_2d[:, 0], X_2d[:, 1], c=y,
+            # Convert string labels to numeric if needed
+            y_numeric = y
+            if isinstance(y[0], str):
+                unique_labels = np.unique(y)
+                y_numeric = np.array([np.where(unique_labels == label)[0][0] for label in y])
+            
+            scatter = plt.scatter(X_2d[:, 0], X_2d[:, 1], c=y_numeric,
                                 cmap='RdYlBu', edgecolors='black', s=50)
             plt.colorbar(scatter)
         

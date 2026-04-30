@@ -39,13 +39,14 @@ logger = logging.getLogger(__name__)
 
 
 class PakSentinelPipeline:
-    def __init__(self, output_dir: str = "./output"):
+    def __init__(self, output_dir: str = "./output", force_retrain: bool = False):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.models_dir = Path("./models")
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.results: Dict[str, object] = {}
         self.class_weights: Dict[str, float] | None = None
+        self.force_retrain = force_retrain
 
     def _save_json(self, name: str, payload: Dict):
         path = self.output_dir / name
@@ -55,7 +56,7 @@ class PakSentinelPipeline:
 
     def run_task1_data_sourcing(self) -> pd.DataFrame:
         manager = DataSourceManager(data_dir="./data/raw")
-        combined_df, stats = manager.combine_datasets(min_samples=5000)
+        combined_df, stats = manager.combine_datasets(min_samples=5000, target_samples=5000)
         combined_df, imbalance_meta = manager.handle_class_imbalance(combined_df, method="class_weighted")
         reliability_report = manager.generate_reliability_report(combined_df, stats)
         reliability_report["imbalance_handling"] = imbalance_meta
@@ -103,6 +104,19 @@ class PakSentinelPipeline:
         return processed_df
 
     def run_task4_ngram_models(self, df: pd.DataFrame) -> Dict:
+        # Check for cached results first
+        if not self.force_retrain:
+            cached = self._load_task4_cache()
+            if cached is not None:
+                logger.info("Using cached Task 4 results from previous run")
+                self.results["task4"] = {
+                    "accuracy": cached["heldout_metrics"]["accuracy"],
+                    "f1_score": cached["heldout_metrics"]["f1_score"],
+                }
+                return cached
+        
+        logger.info("Training language models for Task 4...")
+        
         train_df, test_df = train_test_split(
             df,
             test_size=min(100, max(60, int(len(df) * 0.1))),
@@ -121,6 +135,10 @@ class PakSentinelPipeline:
             "heldout_metrics": eval_results,
             "top_ngrams": {key: [(list(ngram), count) for ngram, count in value] for key, value in comparison.items()},
         }
+        
+        # Cache results
+        self._save_task4_cache(task4_payload)
+        
         self._save_json("task4_ngram_results.json", task4_payload)
         self.results["task4"] = {
             "accuracy": eval_results["accuracy"],
@@ -147,7 +165,104 @@ class PakSentinelPipeline:
             pickle.dump(bundle, handle)
         return bundle_path
 
+    def _save_task4_cache(self, results: Dict):
+        """Save results for task 4 to cache"""
+        cache_dir = self.models_dir / "task4_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        results_path = cache_dir / "results.json"
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2, default=str)
+        
+        logger.info(f"✓ Task 4 results cached to {cache_dir}")
+        return cache_dir
+    
+    def _load_task4_cache(self) -> dict:
+        """Load cached results for task 4. Returns results dict or None if not found"""
+        cache_dir = self.models_dir / "task4_cache"
+        
+        if not cache_dir.exists():
+            return None
+        
+        try:
+            results_path = cache_dir / "results.json"
+            
+            if not results_path.exists():
+                return None
+            
+            with open(results_path, "r") as f:
+                results = json.load(f)
+            
+            logger.info(f"✓ Loaded cached Task 4 results from {cache_dir}")
+            return results
+        except Exception as e:
+            logger.warning(f"Failed to load cached task 4 results: {e}")
+            return None
+    
+    def _save_task5_cache(self, models: Dict, vectorizers: Dict, results: Dict):
+        """Save trained models and results for task 5 to cache"""
+        cache_dir = self.models_dir / "task5_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save models
+        models_path = cache_dir / "models.pkl"
+        with open(models_path, "wb") as f:
+            pickle.dump(models, f)
+        
+        # Save vectorizers
+        vectorizers_path = cache_dir / "vectorizers.pkl"
+        with open(vectorizers_path, "wb") as f:
+            pickle.dump(vectorizers, f)
+        
+        # Save results
+        results_path = cache_dir / "results.json"
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2, default=str)
+        
+        logger.info(f"✓ Task 5 models cached to {cache_dir}")
+        return cache_dir
+    
+    def _load_task5_cache(self) -> tuple:
+        """Load cached models and results for task 5. Returns (models, vectorizers, results) or None if not found"""
+        cache_dir = self.models_dir / "task5_cache"
+        
+        if not cache_dir.exists():
+            return None
+        
+        try:
+            models_path = cache_dir / "models.pkl"
+            vectorizers_path = cache_dir / "vectorizers.pkl"
+            results_path = cache_dir / "results.json"
+            
+            if not (models_path.exists() and vectorizers_path.exists() and results_path.exists()):
+                return None
+            
+            with open(models_path, "rb") as f:
+                models = pickle.load(f)
+            
+            with open(vectorizers_path, "rb") as f:
+                vectorizers = pickle.load(f)
+            
+            with open(results_path, "r") as f:
+                results = json.load(f)
+            
+            logger.info(f"✓ Loaded cached Task 5 models from {cache_dir}")
+            return (models, vectorizers, results)
+        except Exception as e:
+            logger.warning(f"Failed to load cached models: {e}")
+            return None
+
     def run_task5_ml_models(self, df: pd.DataFrame) -> Dict:
+        # Check for cached models first
+        if not self.force_retrain:
+            cached = self._load_task5_cache()
+            if cached is not None:
+                models, vectorizers, results = cached
+                logger.info("Using cached models from previous run")
+                return results
+        
+        logger.info("Training models for Task 5...")
+        
         X_train_text, X_test_text, y_train, y_test = train_test_split(
             df["cleaned_text"].fillna(df["text"]).tolist(),
             df["label"].tolist(),
@@ -268,6 +383,25 @@ class PakSentinelPipeline:
         with open(self.models_dir / "production_metadata.json", "w", encoding="utf-8") as handle:
             json.dump(production_bundle["metadata"] | {"model_name": production_bundle["model_name"], "bundle_path": str(bundle_path)}, handle, indent=2)
 
+        # Cache the trained models for future runs
+        models_to_cache = {
+            "naive_bayes": nb,
+            "logistic_regression_l1": None,
+            "logistic_regression_l2": None,
+            "logistic_regression_elasticnet": None,
+            "polynomial_lr": poly,
+        }
+        # Only store logistic regression artifacts
+        for reg in ("l1", "l2", "elasticnet"):
+            models_to_cache[f"logistic_regression_{reg}"] = logistic_artifacts.get(reg)
+        
+        vectorizers_to_cache = {
+            "bow_vectorizer": bow_vectorizer,
+            "tfidf_vectorizer": tfidf_vectorizer,
+        }
+        
+        self._save_task5_cache(models_to_cache, vectorizers_to_cache, results)
+
         self._save_json("task5_ml_results.json", results)
         self.results["task5"] = {
             "naive_bayes_f1": results["naive_bayes"]["f1_score"],
@@ -284,7 +418,7 @@ class PakSentinelPipeline:
         ablation_results = ablation.run_ablation_study(df, text_col="cleaned_text" if "cleaned_text" in df.columns else "text", label_col="label")
         parallel_plot = ablation.get_parallel_coordinates_plot(self.output_dir / "task6_parallel_coordinates.png")
 
-        registry_summary = manager.register_best_family_models(ablation_results)
+        registry_summary = ablation.register_best_family_models(ablation_results)
         self.results["task6"] = {
             "tracking_uri": tracking_uri,
             "ablation_runs": len(ablation_results),
@@ -344,9 +478,10 @@ def main():
     parser = argparse.ArgumentParser(description="PakSentinel pipeline")
     parser.add_argument("--output-dir", default="./output")
     parser.add_argument("--skip-task", action="append")
+    parser.add_argument("--force-retrain", action="store_true", help="Force retraining of ML models even if cache exists")
     args = parser.parse_args()
 
-    pipeline = PakSentinelPipeline(output_dir=args.output_dir)
+    pipeline = PakSentinelPipeline(output_dir=args.output_dir, force_retrain=args.force_retrain)
     report = pipeline.run_all_tasks(skip_tasks=args.skip_task or [])
     print(json.dumps(report, indent=2, default=str))
 
