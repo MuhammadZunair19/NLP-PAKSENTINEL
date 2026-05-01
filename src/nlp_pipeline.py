@@ -44,7 +44,6 @@ for resource in ("punkt", "stopwords", "wordnet"):
 
 ROMAN_URDU_MARKERS = {
     "acha",
-    "allah",
     "awam",
     "baji",
     "banda",

@@ -6,21 +6,35 @@ import json
 import logging
 import os
 import pickle
+import sys
 import time
+import warnings
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+# Silence known pydantic namespace warning emitted by mlflow internals.
+warnings.filterwarnings(
+    "ignore",
+    message=r'Field "model_name" has conflict with protected namespace "model_".*',
+    category=UserWarning,
+)
+
 import mlflow
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
+
+# Ensure project root is importable when running this file directly.
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from src.nlp_pipeline import NLPPipeline
 
@@ -41,17 +55,25 @@ if not logger.handlers:
 limiter = Limiter(key_func=get_remote_address)
 
 
-class PreprocessRequest(BaseModel):
+class APIBaseModel(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+
+class PreprocessRequest(APIBaseModel):
     text: str = Field(..., min_length=10, max_length=10000)
     steps: List[str] = Field(default=["clean", "tokenize", "stopwords"])
 
 
-class ClassifyRequest(BaseModel):
+class ClassifyRequest(APIBaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     text: str = Field(..., min_length=10, max_length=10000)
     model_type: str = Field(default="production")
 
 
-class BatchClassifyRequest(BaseModel):
+class BatchClassifyRequest(APIBaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     texts: List[str] = Field(..., min_length=1, max_length=100)
     model_type: str = Field(default="production")
 
@@ -64,12 +86,14 @@ class BatchClassifyRequest(BaseModel):
         return texts
 
 
-class RetrievalRequest(BaseModel):
+class RetrievalRequest(APIBaseModel):
     query: str = Field(..., min_length=10, max_length=10000)
     top_k: int = Field(default=5, ge=1, le=20)
 
 
-class HealthResponse(BaseModel):
+class HealthResponse(APIBaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
     model_name: str
     model_version: str
